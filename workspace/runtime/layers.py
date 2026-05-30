@@ -9,7 +9,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .cache import LayerKVCache
-from .rope import apply_rotary_pos_emb
+from .rope import RotaryEmbeddingCache, apply_rotary_pos_emb
 
 
 class RMSNorm(nn.Module):
@@ -50,7 +50,11 @@ class SelfAttention(nn.Module):
         self.k_proj = nn.Linear(config.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(config.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, config.hidden_size, bias=False)
-        self.rope_theta = config.rope_theta
+        self.rope_cache = RotaryEmbeddingCache(
+            head_dim=self.head_dim,
+            theta=config.rope_theta,
+            max_position_embeddings=config.max_position_embeddings,
+        )
 
     def forward(
         self,
@@ -69,7 +73,7 @@ class SelfAttention(nn.Module):
             query_states,
             key_states,
             position_ids=position_ids,
-            theta=self.rope_theta,
+            rope_cache=self.rope_cache,
         )
 
         if past_key_value is not None:
