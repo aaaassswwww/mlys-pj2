@@ -127,3 +127,7 @@ python3 workspace/tools/profile_decode.py --device auto --batch-size 8 --prompt-
 - 在保持 correctness 的前提下压 attention 主链耗时
 - 优先尝试 PyTorch `scaled_dot_product_attention` 路径
 - 继续观察 decode 与 mixed 是否同步提升
+
+最新尝试方向：
+- 为 evaluator 热路径的 `engine.prefill / decode / remove` 启用 `torch.inference_mode()`
+- 继续压缩 RoPE 路径中的 dtype 转换与重复 cache 准备开销

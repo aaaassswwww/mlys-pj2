@@ -47,6 +47,7 @@ class Engine:
         self.model = load_model(model_config, weight_dir, device=self.device)
         self.requests = RequestStateTable(device=torch.device(self.device))
 
+    @torch.inference_mode()
     def prefill(self, request_ids: Iterable[int], input_ids: List[object]):
         request_ids = [int(request_id) for request_id in request_ids]
         if len(request_ids) != len(input_ids):
@@ -82,6 +83,7 @@ class Engine:
 
         return torch.stack([logits_by_request[request_id] for request_id in request_ids], dim=0)
 
+    @torch.inference_mode()
     def decode(self, request_ids: Iterable[int], token_ids: object):
         request_ids = [int(request_id) for request_id in request_ids]
         token_ids = _normalize_decode_tokens(token_ids, expected=len(request_ids), device=self.device)
@@ -144,6 +146,7 @@ class Engine:
 
         return torch.stack([logits_by_request[request_id] for request_id in request_ids], dim=0)
 
+    @torch.inference_mode()
     def remove(self, request_ids: Iterable[int]):
         self.requests.remove(request_ids)
 
