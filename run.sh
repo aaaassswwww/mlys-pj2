@@ -2,12 +2,25 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_DIR="$ROOT_DIR/workspace"
-LOG_FILE="$WORKSPACE_DIR/results.log"
-RESULT_LOG_FILE="$WORKSPACE_DIR/result.log"
+
+if [[ -f "$ROOT_DIR/workspace/engine.py" ]]; then
+  RUNTIME_DIR="$ROOT_DIR/workspace"
+  ENGINE_IMPORT_PATH="workspace/engine.py"
+  SELFCHECK_PATH="workspace/tools/selfcheck_submission.py"
+elif [[ -f "$ROOT_DIR/engine.py" ]]; then
+  RUNTIME_DIR="$ROOT_DIR"
+  ENGINE_IMPORT_PATH="engine.py"
+  SELFCHECK_PATH="tools/selfcheck_submission.py"
+else
+  echo "[run.sh] unable to locate engine.py under $ROOT_DIR" >&2
+  exit 1
+fi
+
+LOG_FILE="$RUNTIME_DIR/results.log"
+RESULT_LOG_FILE="$RUNTIME_DIR/result.log"
 OUTPUT_FILE="$ROOT_DIR/output3.txt"
-BENCHMARK_FILE="$WORKSPACE_DIR/benchmark_results.json"
-RUN_CAPTURE_FILE="$WORKSPACE_DIR/output3_runtime.log"
+BENCHMARK_FILE="$RUNTIME_DIR/benchmark_results.json"
+RUN_CAPTURE_FILE="$RUNTIME_DIR/output3_runtime.log"
 
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_BIN="$PYTHON"
@@ -17,7 +30,7 @@ else
   PYTHON_BIN="python"
 fi
 
-mkdir -p "$WORKSPACE_DIR"
+mkdir -p "$RUNTIME_DIR"
 : > "$LOG_FILE"
 : > "$RESULT_LOG_FILE"
 : > "$OUTPUT_FILE"
@@ -29,7 +42,7 @@ exec > >(tee -a "$LOG_FILE" "$RUN_CAPTURE_FILE") 2>&1
 echo "[run.sh] start"
 echo "[run.sh] root=$ROOT_DIR"
 echo "[run.sh] python=$PYTHON_BIN"
-echo "[run.sh] runtime import path: workspace/engine.py"
+echo "[run.sh] runtime import path: $ENGINE_IMPORT_PATH"
 
 cd "$ROOT_DIR"
 
@@ -46,7 +59,7 @@ except Exception as exc:
 PY
 
 echo "[run.sh] running selfcheck"
-"$PYTHON_BIN" workspace/tools/selfcheck_submission.py
+"$PYTHON_BIN" "$SELFCHECK_PATH"
 echo "[run.sh] selfcheck=passed"
 
 if [[ -f "evaluator/benchmark_throughput.py" && -f "target/model_config.json" ]]; then
@@ -58,7 +71,7 @@ if [[ -f "evaluator/benchmark_throughput.py" && -f "target/model_config.json" ]]
   if [[ -d "target/weights" ]]; then
     echo "[run.sh] running benchmark_throughput for output3 context"
     "$PYTHON_BIN" evaluator/benchmark_throughput.py \
-      --engine workspace/engine.py \
+      --engine "$ENGINE_IMPORT_PATH" \
       --model-config target/model_config.json \
       --weight-dir target/weights \
       --device auto > "$BENCHMARK_FILE"
@@ -79,7 +92,11 @@ from pathlib import Path
 root = Path.cwd()
 output_file = root / "output3.txt"
 benchmark_file = root / "workspace" / "benchmark_results.json"
-run_capture_file = root / "workspace" / "output3_runtime.log"
+runtime_dir = root / "workspace"
+if not (runtime_dir / "engine.py").is_file():
+    runtime_dir = root
+benchmark_file = runtime_dir / "benchmark_results.json"
+run_capture_file = runtime_dir / "output3_runtime.log"
 
 run_log = ""
 if run_capture_file.is_file():
@@ -120,7 +137,7 @@ lines.extend(
     [
         "",
     "1. Submission Summary",
-    "- engine entrypoint: workspace/engine.py",
+    f"- engine entrypoint: {('workspace/engine.py' if (root / 'workspace' / 'engine.py').is_file() else 'engine.py')}",
     "- run.sh executed successfully",
     "- selfcheck_submission.py passed",
     "- project status: Phase 0 through Phase 7 completed",
