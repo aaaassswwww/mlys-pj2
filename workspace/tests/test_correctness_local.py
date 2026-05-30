@@ -113,14 +113,14 @@ class BaselineCorrectnessTest(unittest.TestCase):
         ]
         self.engine.prefill([401, 402], prompts)
 
-        original = self.engine.model.logits_for_decode_batch_with_manager
+        original = self.engine.model.logits_and_cache_for_decode_batch
         call_counter = {"count": 0}
 
         def wrapped(*args, **kwargs):
             call_counter["count"] += 1
             return original(*args, **kwargs)
 
-        self.engine.model.logits_for_decode_batch_with_manager = wrapped
+        self.engine.model.logits_and_cache_for_decode_batch = wrapped
         try:
             decode_tokens = torch.tensor([8, 9], dtype=torch.long)
             sequences = [
@@ -133,7 +133,7 @@ class BaselineCorrectnessTest(unittest.TestCase):
             )
             actual = self.engine.decode([401, 402], decode_tokens)
         finally:
-            self.engine.model.logits_for_decode_batch_with_manager = original
+            self.engine.model.logits_and_cache_for_decode_batch = original
 
         self.assert_logits_close(actual, expected)
         self.assertEqual(call_counter["count"], 1)

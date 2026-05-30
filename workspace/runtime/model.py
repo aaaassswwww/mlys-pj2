@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 import torch
 from torch import nn
 
-from .cache import LayerKVCache, RequestKVCache, SlotKVCacheManager
+from .cache import LayerKVCache, RequestKVCache
 from .layers import DecoderLayer, RMSNorm
 
 
@@ -96,29 +96,6 @@ class LlamaLikeModel(nn.Module):
         hidden_states = self.norm(hidden_states)
         return hidden_states, RequestKVCache(next_caches) if use_cache else None
 
-    def forward_incremental_with_manager(
-        self,
-        input_ids: torch.Tensor,
-        cache_manager: SlotKVCacheManager,
-        cache_slot_ids: torch.Tensor,
-        position_ids: torch.Tensor,
-    ) -> torch.Tensor:
-        hidden_states = self.embed_tokens(input_ids)
-        total_length = int(position_ids[0, 0].item()) + 1
-        for layer_index, layer in enumerate(self.layers):
-            hidden_states, _ = layer(
-                hidden_states,
-                position_ids=position_ids,
-                causal_mask=None,
-                past_key_value=None,
-                use_cache=False,
-                cache_manager=cache_manager,
-                cache_slot_ids=cache_slot_ids,
-                cache_total_length=total_length,
-                layer_index=layer_index,
-            )
-        return self.norm(hidden_states)
-
 
 class LlamaLikeForCausalLM(nn.Module):
     def __init__(self, config: LlamaLikeConfig) -> None:
@@ -183,19 +160,3 @@ class LlamaLikeForCausalLM(nn.Module):
         logits = self.lm_head(hidden_states)[:, -1, :]
         assert next_cache is not None
         return logits, next_cache
-
-    @torch.inference_mode()
-    def logits_for_decode_batch_with_manager(
-        self,
-        token_ids: torch.Tensor,
-        cache_manager: SlotKVCacheManager,
-        cache_slot_ids: torch.Tensor,
-        position_ids: torch.Tensor,
-    ) -> torch.Tensor:
-        hidden_states = self.model.forward_incremental_with_manager(
-            token_ids,
-            cache_manager=cache_manager,
-            cache_slot_ids=cache_slot_ids,
-            position_ids=position_ids,
-        )
-        return self.lm_head(hidden_states)[:, -1, :]

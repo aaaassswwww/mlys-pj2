@@ -13,7 +13,7 @@ from typing import Dict, Iterable, List
 import torch
 
 try:
-    from .runtime.cache import CacheHandle, SlotKVCacheManager, split_request_cache, stack_request_caches
+    from .runtime.cache import split_request_cache, stack_request_caches
     from .runtime.loader import build_config, load_model
     from .runtime.request_state import RequestStateTable
     from .runtime.scheduler import group_pairs_by_sequence_length, group_request_ids_by_sequence_length
@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover - supports direct file import by evaluat
     current_dir = Path(__file__).resolve().parent
     if str(current_dir) not in sys.path:
         sys.path.insert(0, str(current_dir))
-    from runtime.cache import CacheHandle, SlotKVCacheManager, split_request_cache, stack_request_caches
+    from runtime.cache import split_request_cache, stack_request_caches
     from runtime.loader import build_config, load_model
     from runtime.request_state import RequestStateTable
     from runtime.scheduler import group_pairs_by_sequence_length, group_request_ids_by_sequence_length
@@ -46,15 +46,6 @@ class Engine:
         self.runtime_config = build_config(model_config)
         self.model = load_model(model_config, weight_dir, device=self.device)
         self.requests = RequestStateTable(device=torch.device(self.device))
-        model_dtype = self.model.lm_head.weight.dtype
-        self.cache_manager = SlotKVCacheManager(
-            num_layers=self.runtime_config.num_hidden_layers,
-            num_kv_heads=self.runtime_config.num_key_value_heads,
-            head_dim=self.runtime_config.head_dim,
-            max_position_embeddings=self.runtime_config.max_position_embeddings,
-            device=torch.device(self.device),
-            dtype=model_dtype,
-        )
 
     def prefill(self, request_ids: Iterable[int], input_ids: List[object]):
         request_ids = [int(request_id) for request_id in request_ids]
@@ -77,18 +68,16 @@ class Engine:
             if len(grouped_request_ids) == 1:
                 logits, kv_cache = self.model.logits_and_cache_for_prefill(batch_input)
                 request_id = grouped_request_ids[0]
-                state = self.requests.upsert_prompt(request_id, sequences_by_request[request_id])
-                cache_handle = self.cache_manager.store_request_cache(state.cache_slot, kv_cache)
-                self.requests.update_kv_cache(request_id, cache_handle)
+                self.requests.upsert_prompt(request_id, sequences_by_request[request_id])
+                self.requests.update_kv_cache(request_id, kv_cache)
                 logits_by_request[request_id] = logits.squeeze(0)
                 continue
 
             logits, batch_cache = self.model.logits_and_cache_for_prefill_batch(batch_input)
             per_request_caches = split_request_cache(batch_cache)
             for request_id, row_logits, request_cache in zip(grouped_request_ids, logits, per_request_caches):
-                state = self.requests.upsert_prompt(request_id, sequences_by_request[request_id])
-                cache_handle = self.cache_manager.store_request_cache(state.cache_slot, request_cache)
-                self.requests.update_kv_cache(request_id, cache_handle)
+                self.requests.upsert_prompt(request_id, sequences_by_request[request_id])
+                self.requests.update_kv_cache(request_id, request_cache)
                 logits_by_request[request_id] = row_logits
 
         return torch.stack([logits_by_request[request_id] for request_id in request_ids], dim=0)
@@ -121,8 +110,7 @@ class Engine:
             if state.tokens is None:
                 raise RuntimeError("Missing full token history for non-cached request")
             logits, kv_cache = self.model.logits_and_cache_for_prefill(state.tokens.view(1, -1))
-            cache_handle = self.cache_manager.store_request_cache(state.cache_slot, kv_cache)
-            self.requests.update_kv_cache(state.request_id, cache_handle)
+            self.requests.update_kv_cache(state.request_id, kv_cache)
             logits_by_request[state.request_id] = logits.squeeze(0)
 
         grouped_state_pairs = group_pairs_by_sequence_length(
@@ -143,18 +131,15 @@ class Engine:
                 device=self.device,
                 dtype=torch.long,
             )
-            slot_ids = torch.tensor([state.cache_slot for state in items], device=self.device, dtype=torch.long)
-            logits = self.model.logits_for_decode_batch_with_manager(
+            batch_cache = stack_request_caches([state.kv_cache for state in items])
+            logits, next_cache = self.model.logits_and_cache_for_decode_batch(
                 batch_tokens,
-                cache_manager=self.cache_manager,
-                cache_slot_ids=slot_ids,
+                kv_cache=batch_cache,
                 position_ids=position_ids,
             )
-            for state, row_logits in zip(items, logits):
-                self.requests.update_kv_cache(
-                    state.request_id,
-                    CacheHandle(slot=state.cache_slot, seq_len=state.seq_len),
-                )
+            per_request_caches = split_request_cache(next_cache)
+            for state, row_logits, request_cache in zip(items, logits, per_request_caches):
+                self.requests.update_kv_cache(state.request_id, request_cache)
                 logits_by_request[state.request_id] = row_logits
 
         return torch.stack([logits_by_request[request_id] for request_id in request_ids], dim=0)
