@@ -103,6 +103,7 @@ class LlamaLikeForCausalLM(nn.Module):
         self.config = config
         self.model = LlamaLikeModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self._compile_enabled = False
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         hidden_states, _ = self.model(input_ids)
@@ -160,3 +161,17 @@ class LlamaLikeForCausalLM(nn.Module):
         logits = self.lm_head(hidden_states)[:, -1, :]
         assert next_cache is not None
         return logits, next_cache
+
+    def try_enable_compile(self) -> bool:
+        compile_fn = getattr(torch, "compile", None)
+        if compile_fn is None:
+            return False
+        if self._compile_enabled:
+            return True
+        try:
+            self.model = compile_fn(self.model, mode="reduce-overhead", fullgraph=False, dynamic=True)
+            self._compile_enabled = True
+            return True
+        except Exception:
+            self._compile_enabled = False
+            return False

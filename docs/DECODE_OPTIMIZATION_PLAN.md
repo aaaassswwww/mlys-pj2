@@ -131,3 +131,4 @@ python3 workspace/tools/profile_decode.py --device auto --batch-size 8 --prompt-
 最新尝试方向：
 - 为 evaluator 热路径的 `engine.prefill / decode / remove` 启用 `torch.inference_mode()`
 - 继续压缩 RoPE 路径中的 dtype 转换与重复 cache 准备开销
+- 在 CUDA 环境下尝试 `torch.compile(..., mode="reduce-overhead")`，并把预编译 warmup 放到引擎初始化阶段

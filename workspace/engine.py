@@ -45,6 +45,7 @@ class Engine:
         self.device = _resolve_device(device)
         self.runtime_config = build_config(model_config)
         self.model = load_model(model_config, weight_dir, device=self.device)
+        self._maybe_prepare_compiled_paths()
         self.requests = RequestStateTable(device=torch.device(self.device))
 
     @torch.inference_mode()
@@ -149,6 +150,26 @@ class Engine:
     @torch.inference_mode()
     def remove(self, request_ids: Iterable[int]):
         self.requests.remove(request_ids)
+
+    def _maybe_prepare_compiled_paths(self) -> None:
+        if not str(self.device).startswith("cuda"):
+            return
+        if not self.model.try_enable_compile():
+            return
+        self._warmup_compiled_paths()
+
+    @torch.inference_mode()
+    def _warmup_compiled_paths(self) -> None:
+        prompt_len = min(8, self.runtime_config.max_position_embeddings)
+        prompt = torch.zeros((1, prompt_len), device=self.device, dtype=torch.long)
+        _, kv_cache = self.model.logits_and_cache_for_prefill(prompt)
+        decode_tokens = torch.zeros((1, 1), device=self.device, dtype=torch.long)
+        position_ids = torch.full((1, 1), prompt_len, device=self.device, dtype=torch.long)
+        self.model.logits_and_cache_for_decode_batch(
+            decode_tokens,
+            kv_cache=kv_cache,
+            position_ids=position_ids,
+        )
 
 
 def _resolve_device(device: str) -> str:
