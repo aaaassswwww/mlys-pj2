@@ -58,14 +58,12 @@ class SubmissionEntrypointTest(unittest.TestCase):
         self.assertIn("[run.sh] selfcheck=passed", log_text)
         self.assertIn("[selfcheck] prefill_decode_remove=ok", log_text)
         self.assertIn("[run.sh] selfcheck=passed", result_log_text)
+        self.assertIn("---- result ----", output_text)
+        self.assertIn("---- agent output ----", output_text)
         self.assertIn("workspace/engine.py", output_text)
         self.assertIn("Phase 0 through Phase 7 completed", output_text)
         self.assertIn("Decode Optimization Reasoning", output_text)
-        self.assertIn("Current Benchmark Result On This Environment", output_text)
-        self.assertTrue(
-            "benchmark_throughput.py completed on this environment." in output_text
-            or "benchmark_throughput.py was not run in this environment." in output_text
-        )
+        self.assertIn("benchmark status in this run:", output_text)
 
 
 if __name__ == "__main__":
