@@ -37,17 +37,29 @@ def load_model(model_config: Dict[str, Any], weight_dir: str, device: str = "cpu
 
 
 def _find_weight_file(weight_dir: Path) -> Path:
+    normalized_dir = Path(str(weight_dir).replace("\\", "/"))
     candidates = [
         weight_dir / "model.pt",
         weight_dir / "pytorch_model.bin",
         weight_dir / "weights.pt",
         weight_dir / "model.pth",
+        normalized_dir / "model.pt",
+        normalized_dir / "pytorch_model.bin",
+        normalized_dir / "weights.pt",
+        normalized_dir / "model.pth",
     ]
     for candidate in candidates:
         if candidate.is_file():
             return candidate
 
-    discovered = sorted(weight_dir.glob("*.pt")) + sorted(weight_dir.glob("*.bin")) + sorted(weight_dir.glob("*.pth"))
+    discovered = (
+        sorted(weight_dir.glob("*.pt"))
+        + sorted(weight_dir.glob("*.bin"))
+        + sorted(weight_dir.glob("*.pth"))
+        + sorted(normalized_dir.glob("*.pt"))
+        + sorted(normalized_dir.glob("*.bin"))
+        + sorted(normalized_dir.glob("*.pth"))
+    )
     if discovered:
         return discovered[0]
     raise FileNotFoundError(f"No supported weight file found in {weight_dir}")
@@ -102,4 +114,3 @@ def _validate_state_dict_compatibility(missing: list[str], unexpected: list[str]
     if unexpected:
         preview = ", ".join(sorted(unexpected)[:8])
         raise ValueError(f"Unexpected weight keys: {preview}")
-
