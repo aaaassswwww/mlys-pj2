@@ -65,6 +65,7 @@ class SubmissionEntrypointTest(unittest.TestCase):
         self.assertIn("Phase 0 through Phase 7 completed", output_text)
         self.assertIn("Decode Optimization Reasoning", output_text)
         self.assertIn("benchmark status in this run:", output_text)
+        self.assertTrue('"case_name"' in output_text or "- unavailable in this run" in output_text)
 
 
 if __name__ == "__main__":

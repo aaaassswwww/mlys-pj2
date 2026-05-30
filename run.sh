@@ -89,17 +89,15 @@ lines = ["---- result ----"]
 if benchmark_file.is_file():
     try:
         benchmark_text = benchmark_file.read_text(encoding="utf-8").strip()
-        benchmark_results = json.loads(benchmark_text)
+        json.loads(benchmark_text)
     except Exception as exc:
         benchmark_summary = [f"- benchmark parsing failed: {exc!r}"]
         benchmark_status = "parsing_failed"
     else:
-        benchmark_summary = ["5. Current Benchmark Result On This Environment"]
-        for case in benchmark_results:
-            benchmark_summary.append(f"- {case['case_name']}:")
-            benchmark_summary.append(f"  - total tokens/s: {case['tokens_per_second']:.2f}")
-            benchmark_summary.append(f"  - decode tokens/s: {case['decode_tokens_per_second']:.2f}")
-            benchmark_summary.append(f"  - peak memory mb: {case['peak_memory_mb']:.2f}")
+        benchmark_summary = [
+            "5. Current Benchmark Result On This Environment",
+            benchmark_text,
+        ]
         benchmark_status = "completed"
 else:
     benchmark_summary = [
