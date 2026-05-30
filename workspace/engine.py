@@ -1,0 +1,170 @@
+"""Evaluator-facing engine entrypoint.
+
+This module intentionally stays small and stable.
+All runtime internals should live under workspace/runtime/.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Dict, Iterable, List
+
+import torch
+
+try:
+    from .runtime.cache import split_request_cache, stack_request_caches
+    from .runtime.loader import build_config, load_model
+    from .runtime.request_state import RequestStateTable
+    from .runtime.scheduler import group_pairs_by_sequence_length, group_request_ids_by_sequence_length
+except ImportError:  # pragma: no cover - supports direct file import by evaluator
+    current_dir = Path(__file__).resolve().parent
+    if str(current_dir) not in sys.path:
+        sys.path.insert(0, str(current_dir))
+    from runtime.cache import split_request_cache, stack_request_caches
+    from runtime.loader import build_config, load_model
+    from runtime.request_state import RequestStateTable
+    from runtime.scheduler import group_pairs_by_sequence_length, group_request_ids_by_sequence_length
+
+
+def create_engine(model_config: dict, weight_dir: str, device: str = "cuda") -> "Engine":
+    """Create the evaluator-facing runtime instance.
+
+    Phase 1 provides a correctness-first baseline that recomputes full
+    request sequences on each decode step.
+    """
+    return Engine(model_config=model_config, weight_dir=weight_dir, device=device)
+
+
+class Engine:
+    """Stable runtime facade for the evaluator contract."""
+
+    def __init__(self, model_config: Dict, weight_dir: str, device: str = "cuda") -> None:
+        self.model_config = model_config
+        self.weight_dir = weight_dir
+        self.device = _resolve_device(device)
+        self.runtime_config = build_config(model_config)
+        self.model = load_model(model_config, weight_dir, device=self.device)
+        self.requests = RequestStateTable(device=torch.device(self.device))
+
+    def prefill(self, request_ids: Iterable[int], input_ids: List[object]):
+        request_ids = [int(request_id) for request_id in request_ids]
+        if len(request_ids) != len(input_ids):
+            raise ValueError("request_ids and input_ids must have the same length")
+
+        sequences_by_request: dict[int, torch.Tensor] = {}
+        sequence_lengths: list[int] = []
+        for request_id, tokens in zip(request_ids, input_ids):
+            sequence = _normalize_sequence(tokens, device=self.device)
+            if sequence.numel() == 0:
+                raise ValueError("prefill sequences must be non-empty")
+            sequences_by_request[request_id] = sequence
+            sequence_lengths.append(sequence.numel())
+
+        logits_by_request: dict[int, torch.Tensor] = {}
+        grouped_requests = group_request_ids_by_sequence_length(request_ids, sequence_lengths)
+        for _, grouped_request_ids in grouped_requests.items():
+            batch_input = torch.stack([sequences_by_request[request_id] for request_id in grouped_request_ids], dim=0)
+            if len(grouped_request_ids) == 1:
+                logits, kv_cache = self.model.logits_and_cache_for_prefill(batch_input)
+                request_id = grouped_request_ids[0]
+                self.requests.upsert_prompt(request_id, sequences_by_request[request_id])
+                self.requests.update_kv_cache(request_id, kv_cache)
+                logits_by_request[request_id] = logits.squeeze(0)
+                continue
+
+            logits, batch_cache = self.model.logits_and_cache_for_prefill_batch(batch_input)
+            per_request_caches = split_request_cache(batch_cache)
+            for request_id, row_logits, request_cache in zip(grouped_request_ids, logits, per_request_caches):
+                self.requests.upsert_prompt(request_id, sequences_by_request[request_id])
+                self.requests.update_kv_cache(request_id, request_cache)
+                logits_by_request[request_id] = row_logits
+
+        return torch.stack([logits_by_request[request_id] for request_id in request_ids], dim=0)
+
+    def decode(self, request_ids: Iterable[int], token_ids: object):
+        request_ids = [int(request_id) for request_id in request_ids]
+        token_ids = _normalize_decode_tokens(token_ids, expected=len(request_ids), device=self.device)
+        token_values = token_ids.tolist()
+
+        states = []
+        for request_id, token_id in zip(request_ids, token_values):
+            states.append(self.requests.append_token(request_id, int(token_id)))
+
+        logits_by_request: dict[int, torch.Tensor] = {}
+        fallback_states = [state for state in states if state.kv_cache is None]
+        for state in fallback_states:
+            logits, kv_cache = self.model.logits_and_cache_for_prefill(state.tokens.view(1, -1))
+            self.requests.update_kv_cache(state.request_id, kv_cache)
+            logits_by_request[state.request_id] = logits.squeeze(0)
+
+        cached_request_ids = [state.request_id for state in states if state.kv_cache is not None]
+        cached_token_values = [token_id for state, token_id in zip(states, token_values) if state.kv_cache is not None]
+        cached_sequence_lengths = [state.seq_len - 1 for state in states if state.kv_cache is not None]
+        grouped_state_pairs = group_pairs_by_sequence_length(
+            cached_request_ids,
+            cached_token_values,
+            cached_sequence_lengths,
+        )
+
+        state_by_request_id = {state.request_id: state for state in states}
+        for cache_len, request_token_pairs in grouped_state_pairs.items():
+            items = [(state_by_request_id[request_id], token_id) for request_id, token_id in request_token_pairs]
+            if len(items) == 1:
+                state, token_id = items[0]
+                position_ids = torch.tensor([[state.seq_len - 1]], device=self.device, dtype=torch.long)
+                decode_token = torch.tensor([[token_id]], device=self.device, dtype=torch.long)
+                logits, kv_cache = self.model.logits_and_cache_for_decode_step(
+                    decode_token,
+                    kv_cache=state.kv_cache,
+                    position_ids=position_ids,
+                )
+                self.requests.update_kv_cache(state.request_id, kv_cache)
+                logits_by_request[state.request_id] = logits.squeeze(0)
+                continue
+
+            batch_tokens = torch.tensor([[token_id] for state, token_id in items], device=self.device, dtype=torch.long)
+            position_ids = torch.full(
+                (len(items), 1),
+                fill_value=cache_len,
+                device=self.device,
+                dtype=torch.long,
+            )
+            batch_cache = stack_request_caches([state.kv_cache for state, _ in items])
+            logits, next_cache = self.model.logits_and_cache_for_decode_batch(
+                batch_tokens,
+                kv_cache=batch_cache,
+                position_ids=position_ids,
+            )
+            per_request_caches = split_request_cache(next_cache)
+            for (state, _), row_logits, request_cache in zip(items, logits, per_request_caches):
+                self.requests.update_kv_cache(state.request_id, request_cache)
+                logits_by_request[state.request_id] = row_logits
+
+        return torch.stack([logits_by_request[request_id] for request_id in request_ids], dim=0)
+
+    def remove(self, request_ids: Iterable[int]):
+        self.requests.remove(request_ids)
+
+
+def _resolve_device(device: str) -> str:
+    if device == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda" and not torch.cuda.is_available():
+        return "cpu"
+    return device
+
+
+def _normalize_sequence(tokens: object, device: str) -> torch.Tensor:
+    if not isinstance(tokens, torch.Tensor):
+        tokens = torch.as_tensor(tokens, dtype=torch.long)
+    return tokens.to(device=device, dtype=torch.long).view(-1)
+
+
+def _normalize_decode_tokens(token_ids: object, expected: int, device: str) -> torch.Tensor:
+    if not isinstance(token_ids, torch.Tensor):
+        token_ids = torch.as_tensor(token_ids, dtype=torch.long)
+    token_ids = token_ids.to(device=device, dtype=torch.long).view(-1)
+    if token_ids.numel() != expected:
+        raise ValueError(f"Expected {expected} decode tokens, got {token_ids.numel()}")
+    return token_ids
