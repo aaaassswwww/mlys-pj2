@@ -95,7 +95,7 @@ if [[ -f "evaluator/benchmark_throughput.py" && -f "target/model_config.json" ]]
 
   if [[ -d "target/weights" ]]; then
     echo "[run.sh] running benchmark_throughput for output3 context"
-    "$PYTHON_BIN" evaluator/benchmark_throughput.py \
+    MLSYS_DISABLE_COMPILE=1 "$PYTHON_BIN" evaluator/benchmark_throughput.py \
       --engine "$ENGINE_IMPORT_PATH" \
       --model-config target/model_config.json \
       --weight-dir target/weights \

@@ -6,6 +6,7 @@ All runtime internals should live under workspace/runtime/.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Iterable, List
@@ -152,6 +153,8 @@ class Engine:
         self.requests.remove(request_ids)
 
     def _maybe_prepare_compiled_paths(self) -> None:
+        if os.environ.get("MLSYS_DISABLE_COMPILE", "").lower() in {"1", "true", "yes", "on"}:
+            return
         if not str(self.device).startswith("cuda"):
             return
         if not self.model.try_enable_compile():
