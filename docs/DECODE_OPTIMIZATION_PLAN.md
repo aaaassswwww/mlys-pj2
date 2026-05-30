@@ -121,9 +121,9 @@ python3 workspace/tools/profile_decode.py --device auto --batch-size 8 --prompt-
 ## 7. 当前轮次状态
 
 当前处于：
-- `Step 1 / Round 2 in progress`
+- `Step 2 in progress`
 
 当前轮次目标：
-- 去掉 decode 路径里不必要的 clone
-- 减少 `tolist()` 和额外小 tensor 构造
-- 去掉 cached request 上的整段 `torch.cat` token 追加
+- 在保持 correctness 的前提下压 attention 主链耗时
+- 优先尝试 PyTorch `scaled_dot_product_attention` 路径
+- 继续观察 decode 与 mixed 是否同步提升

@@ -82,16 +82,36 @@ class SelfAttention(nn.Module):
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
-
-        attn_weights = torch.matmul(query_states, key_states.transpose(-1, -2))
-        attn_weights = attn_weights / math.sqrt(self.head_dim)
-        if causal_mask is not None:
-            attn_weights = attn_weights + causal_mask.view(1, 1, seq_len, key_states.size(-2))
-        attn_weights = torch.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-
-        attn_output = torch.matmul(attn_weights, value_states)
+        attn_output = self._attention(query_states, key_states, value_states, causal_mask)
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.hidden_size)
         return self.o_proj(attn_output), present_key_value
+
+    def _attention(
+        self,
+        query_states: torch.Tensor,
+        key_states: torch.Tensor,
+        value_states: torch.Tensor,
+        causal_mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        try:
+            if causal_mask is not None:
+                attn_mask = causal_mask.view(1, 1, query_states.size(-2), key_states.size(-2))
+            else:
+                attn_mask = None
+            return F.scaled_dot_product_attention(
+                query_states,
+                key_states,
+                value_states,
+                attn_mask=attn_mask,
+                dropout_p=0.0,
+            )
+        except Exception:
+            attn_weights = torch.matmul(query_states, key_states.transpose(-1, -2))
+            attn_weights = attn_weights / math.sqrt(self.head_dim)
+            if causal_mask is not None:
+                attn_weights = attn_weights + causal_mask.view(1, 1, query_states.size(-2), key_states.size(-2))
+            attn_weights = torch.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+            return torch.matmul(attn_weights, value_states)
 
 
 class DecoderLayer(nn.Module):
