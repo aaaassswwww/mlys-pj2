@@ -102,7 +102,7 @@ class LlamaLikeForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.model = LlamaLikeModel(config)
-        self._eager_model = self.model
+        object.__setattr__(self, "_eager_model", self.model)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self._compile_enabled = False
 
