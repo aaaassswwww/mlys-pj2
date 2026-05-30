@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$ROOT_DIR/workspace"
 LOG_FILE="$WORKSPACE_DIR/results.log"
 RESULT_LOG_FILE="$WORKSPACE_DIR/result.log"
-OUTPUT_FILE="$WORKSPACE_DIR/output3.txt"
+OUTPUT_FILE="$ROOT_DIR/output3.txt"
 
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_BIN="$PYTHON"

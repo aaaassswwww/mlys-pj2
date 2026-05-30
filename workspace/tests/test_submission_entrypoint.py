@@ -48,7 +48,7 @@ class SubmissionEntrypointTest(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         log_path = ROOT / "workspace" / "results.log"
         result_log_path = ROOT / "workspace" / "result.log"
-        output_path = ROOT / "workspace" / "output3.txt"
+        output_path = ROOT / "output3.txt"
         self.assertTrue(log_path.is_file())
         self.assertTrue(result_log_path.is_file())
         self.assertTrue(output_path.is_file())
