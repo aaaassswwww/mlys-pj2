@@ -61,11 +61,7 @@ def apply_rotary_pos_emb(
 def rotate_interleaved(hidden_states: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
     even = hidden_states[..., 0::2]
     odd = hidden_states[..., 1::2]
-    rotated = torch.stack(
-        (
-            even * cos - odd * sin,
-            even * sin + odd * cos,
-        ),
-        dim=-1,
-    )
-    return rotated.flatten(-2)
+    rotated = torch.empty_like(hidden_states)
+    rotated[..., 0::2] = even * cos - odd * sin
+    rotated[..., 1::2] = even * sin + odd * cos
+    return rotated
