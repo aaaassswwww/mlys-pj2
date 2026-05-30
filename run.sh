@@ -3,16 +3,41 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+ENGINE_IMPORT_PATH=""
+SELFCHECK_PATH=""
+RUNTIME_DIR=""
+
 if [[ -f "$ROOT_DIR/workspace/engine.py" ]]; then
-  RUNTIME_DIR="$ROOT_DIR/workspace"
   ENGINE_IMPORT_PATH="workspace/engine.py"
-  SELFCHECK_PATH="workspace/tools/selfcheck_submission.py"
 elif [[ -f "$ROOT_DIR/engine.py" ]]; then
-  RUNTIME_DIR="$ROOT_DIR"
   ENGINE_IMPORT_PATH="engine.py"
+else
+  ENGINE_CANDIDATE="$(find "$ROOT_DIR" -maxdepth 4 -type f -name engine.py | head -n 1 || true)"
+  if [[ -n "$ENGINE_CANDIDATE" ]]; then
+    ENGINE_IMPORT_PATH="${ENGINE_CANDIDATE#$ROOT_DIR/}"
+  fi
+fi
+
+if [[ -z "$ENGINE_IMPORT_PATH" ]]; then
+  echo "[run.sh] unable to locate engine.py under $ROOT_DIR" >&2
+  exit 1
+fi
+
+RUNTIME_DIR="$(cd "$(dirname "$ROOT_DIR/$ENGINE_IMPORT_PATH")" && pwd)"
+
+if [[ -f "$ROOT_DIR/workspace/tools/selfcheck_submission.py" ]]; then
+  SELFCHECK_PATH="workspace/tools/selfcheck_submission.py"
+elif [[ -f "$ROOT_DIR/tools/selfcheck_submission.py" ]]; then
   SELFCHECK_PATH="tools/selfcheck_submission.py"
 else
-  echo "[run.sh] unable to locate engine.py under $ROOT_DIR" >&2
+  SELFCHECK_CANDIDATE="$(find "$ROOT_DIR" -maxdepth 5 -type f -path '*/tools/selfcheck_submission.py' | head -n 1 || true)"
+  if [[ -n "$SELFCHECK_CANDIDATE" ]]; then
+    SELFCHECK_PATH="${SELFCHECK_CANDIDATE#$ROOT_DIR/}"
+  fi
+fi
+
+if [[ -z "$SELFCHECK_PATH" ]]; then
+  echo "[run.sh] unable to locate selfcheck_submission.py under $ROOT_DIR" >&2
   exit 1
 fi
 
