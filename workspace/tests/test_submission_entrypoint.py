@@ -61,8 +61,11 @@ class SubmissionEntrypointTest(unittest.TestCase):
         self.assertIn("workspace/engine.py", output_text)
         self.assertIn("Phase 0 through Phase 7 completed", output_text)
         self.assertIn("Decode Optimization Reasoning", output_text)
-        self.assertIn("Best Public Benchmark Result Observed", output_text)
-        self.assertIn("decode tokens/s: 1275.08", output_text)
+        self.assertIn("Current Benchmark Result On This Environment", output_text)
+        self.assertTrue(
+            "benchmark_throughput.py completed on this environment." in output_text
+            or "benchmark_throughput.py was not run in this environment." in output_text
+        )
 
 
 if __name__ == "__main__":
