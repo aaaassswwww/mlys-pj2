@@ -86,70 +86,58 @@ class Engine:
         request_ids = [int(request_id) for request_id in request_ids]
         token_ids = _normalize_decode_tokens(token_ids, expected=len(request_ids), device=self.device)
 
-        states = []
-        state_by_request_id: dict[int, object] = {}
-        sequence_lengths: list[int] = []
+        state_by_request_id = {}
         cached_request_ids: list[int] = []
-        cached_token_values: list[int] = []
         cached_sequence_lengths: list[int] = []
+        cached_indices: list[int] = []
         fallback_request_ids: list[int] = []
 
         for index, request_id in enumerate(request_ids):
             token_value = int(token_ids[index].item())
             state = self.requests.append_token(request_id, token_value)
-            states.append(state)
             state_by_request_id[request_id] = state
-            sequence_lengths.append(state.seq_len)
             if state.kv_cache is None:
                 fallback_request_ids.append(request_id)
             else:
                 cached_request_ids.append(request_id)
-                cached_token_values.append(token_value)
                 cached_sequence_lengths.append(state.seq_len - 1)
+                cached_indices.append(index)
 
         logits_by_request: dict[int, torch.Tensor] = {}
         for request_id in fallback_request_ids:
             state = state_by_request_id[request_id]
+            if state.tokens is None:
+                raise RuntimeError("Missing full token history for non-cached request")
             logits, kv_cache = self.model.logits_and_cache_for_prefill(state.tokens.view(1, -1))
             self.requests.update_kv_cache(state.request_id, kv_cache)
             logits_by_request[state.request_id] = logits.squeeze(0)
 
         grouped_state_pairs = group_pairs_by_sequence_length(
             cached_request_ids,
-            cached_token_values,
+            cached_indices,
             cached_sequence_lengths,
         )
 
-        for cache_len, request_token_pairs in grouped_state_pairs.items():
-            items = [(state_by_request_id[request_id], token_id) for request_id, token_id in request_token_pairs]
-            if len(items) == 1:
-                state, token_id = items[0]
-                position_ids = torch.tensor([[state.seq_len - 1]], device=self.device, dtype=torch.long)
-                decode_token = torch.tensor([[token_id]], device=self.device, dtype=torch.long)
-                logits, kv_cache = self.model.logits_and_cache_for_decode_step(
-                    decode_token,
-                    kv_cache=state.kv_cache,
-                    position_ids=position_ids,
-                )
-                self.requests.update_kv_cache(state.request_id, kv_cache)
-                logits_by_request[state.request_id] = logits.squeeze(0)
-                continue
+        for cache_len, request_index_pairs in grouped_state_pairs.items():
+            request_group = [request_id for request_id, _ in request_index_pairs]
+            group_indices = [token_index for _, token_index in request_index_pairs]
+            items = [state_by_request_id[request_id] for request_id in request_group]
 
-            batch_tokens = torch.tensor([[token_id] for state, token_id in items], device=self.device, dtype=torch.long)
+            batch_tokens = token_ids[group_indices].unsqueeze(1)
             position_ids = torch.full(
-                (len(items), 1),
+                (len(request_group), 1),
                 fill_value=cache_len,
                 device=self.device,
                 dtype=torch.long,
             )
-            batch_cache = stack_request_caches([state.kv_cache for state, _ in items])
+            batch_cache = stack_request_caches([state.kv_cache for state in items])
             logits, next_cache = self.model.logits_and_cache_for_decode_batch(
                 batch_tokens,
                 kv_cache=batch_cache,
                 position_ids=position_ids,
             )
             per_request_caches = split_request_cache(next_cache)
-            for (state, _), row_logits, request_cache in zip(items, logits, per_request_caches):
+            for state, row_logits, request_cache in zip(items, logits, per_request_caches):
                 self.requests.update_kv_cache(state.request_id, request_cache)
                 logits_by_request[state.request_id] = row_logits
 

@@ -13,14 +13,11 @@ from .cache import RequestKVCache
 @dataclass
 class RequestState:
     request_id: int
-    tokens: torch.Tensor
+    tokens: torch.Tensor | None
+    seq_len: int
     kv_cache: RequestKVCache | None = None
     cache_slot: int | None = None
     active: bool = True
-
-    @property
-    def seq_len(self) -> int:
-        return int(self.tokens.numel())
 
 
 class RequestStateTable:
@@ -37,6 +34,7 @@ class RequestStateTable:
         state = RequestState(
             request_id=request_id,
             tokens=tokens.to(self.device, dtype=torch.long).clone(),
+            seq_len=int(tokens.numel()),
             cache_slot=self._allocate_cache_slot(),
             active=True,
         )
@@ -45,13 +43,17 @@ class RequestStateTable:
 
     def append_token(self, request_id: int, token_id: int) -> RequestState:
         state = self.require(request_id)
-        next_token = torch.tensor([token_id], device=self.device, dtype=torch.long)
-        state.tokens = torch.cat([state.tokens, next_token], dim=0)
+        state.seq_len += 1
+        if state.kv_cache is None and state.tokens is not None:
+            next_token = torch.tensor([token_id], device=self.device, dtype=torch.long)
+            state.tokens = torch.cat([state.tokens, next_token], dim=0)
         return state
 
     def update_kv_cache(self, request_id: int, kv_cache: RequestKVCache) -> RequestState:
         state = self.require(request_id)
         state.kv_cache = kv_cache
+        if state.tokens is not None and state.tokens.numel() == state.seq_len:
+            state.tokens = None
         return state
 
     def remove(self, request_ids: Iterable[int]) -> None:
