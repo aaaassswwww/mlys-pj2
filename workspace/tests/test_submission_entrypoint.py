@@ -60,6 +60,9 @@ class SubmissionEntrypointTest(unittest.TestCase):
         self.assertIn("[run.sh] selfcheck=passed", result_log_text)
         self.assertIn("workspace/engine.py", output_text)
         self.assertIn("Phase 0 through Phase 7 completed", output_text)
+        self.assertIn("Decode Optimization Reasoning", output_text)
+        self.assertIn("Best Public Benchmark Result Observed", output_text)
+        self.assertIn("decode tokens/s: 1275.08", output_text)
 
 
 if __name__ == "__main__":
