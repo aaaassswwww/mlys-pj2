@@ -47,10 +47,19 @@ class SubmissionEntrypointTest(unittest.TestCase):
         )
         self.assertEqual(result.stdout, "")
         log_path = ROOT / "workspace" / "results.log"
+        result_log_path = ROOT / "workspace" / "result.log"
+        output_path = ROOT / "workspace" / "output3.txt"
         self.assertTrue(log_path.is_file())
+        self.assertTrue(result_log_path.is_file())
+        self.assertTrue(output_path.is_file())
         log_text = log_path.read_text(encoding="utf-8")
+        result_log_text = result_log_path.read_text(encoding="utf-8")
+        output_text = output_path.read_text(encoding="utf-8")
         self.assertIn("[run.sh] selfcheck=passed", log_text)
         self.assertIn("[selfcheck] prefill_decode_remove=ok", log_text)
+        self.assertIn("[run.sh] selfcheck=passed", result_log_text)
+        self.assertIn("workspace/engine.py", output_text)
+        self.assertIn("Phase 0 through Phase 7 completed", output_text)
 
 
 if __name__ == "__main__":
