@@ -85,29 +85,41 @@ class Engine:
     def decode(self, request_ids: Iterable[int], token_ids: object):
         request_ids = [int(request_id) for request_id in request_ids]
         token_ids = _normalize_decode_tokens(token_ids, expected=len(request_ids), device=self.device)
-        token_values = token_ids.tolist()
 
         states = []
-        for request_id, token_id in zip(request_ids, token_values):
-            states.append(self.requests.append_token(request_id, int(token_id)))
+        state_by_request_id: dict[int, object] = {}
+        sequence_lengths: list[int] = []
+        cached_request_ids: list[int] = []
+        cached_token_values: list[int] = []
+        cached_sequence_lengths: list[int] = []
+        fallback_request_ids: list[int] = []
+
+        for index, request_id in enumerate(request_ids):
+            token_value = int(token_ids[index].item())
+            state = self.requests.append_token(request_id, token_value)
+            states.append(state)
+            state_by_request_id[request_id] = state
+            sequence_lengths.append(state.seq_len)
+            if state.kv_cache is None:
+                fallback_request_ids.append(request_id)
+            else:
+                cached_request_ids.append(request_id)
+                cached_token_values.append(token_value)
+                cached_sequence_lengths.append(state.seq_len - 1)
 
         logits_by_request: dict[int, torch.Tensor] = {}
-        fallback_states = [state for state in states if state.kv_cache is None]
-        for state in fallback_states:
+        for request_id in fallback_request_ids:
+            state = state_by_request_id[request_id]
             logits, kv_cache = self.model.logits_and_cache_for_prefill(state.tokens.view(1, -1))
             self.requests.update_kv_cache(state.request_id, kv_cache)
             logits_by_request[state.request_id] = logits.squeeze(0)
 
-        cached_request_ids = [state.request_id for state in states if state.kv_cache is not None]
-        cached_token_values = [token_id for state, token_id in zip(states, token_values) if state.kv_cache is not None]
-        cached_sequence_lengths = [state.seq_len - 1 for state in states if state.kv_cache is not None]
         grouped_state_pairs = group_pairs_by_sequence_length(
             cached_request_ids,
             cached_token_values,
             cached_sequence_lengths,
         )
 
-        state_by_request_id = {state.request_id: state for state in states}
         for cache_len, request_token_pairs in grouped_state_pairs.items():
             items = [(state_by_request_id[request_id], token_id) for request_id, token_id in request_token_pairs]
             if len(items) == 1:
