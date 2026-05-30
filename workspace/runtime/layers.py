@@ -8,7 +8,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from .cache import LayerKVCache
+from .cache import LayerKVCache, SlotKVCacheManager
 from .rope import RotaryEmbeddingCache, apply_rotary_pos_emb
 
 
@@ -63,6 +63,10 @@ class SelfAttention(nn.Module):
         causal_mask: torch.Tensor | None,
         past_key_value: LayerKVCache | None = None,
         use_cache: bool = False,
+        cache_manager: SlotKVCacheManager | None = None,
+        cache_slot_ids: torch.Tensor | None = None,
+        cache_total_length: int | None = None,
+        layer_index: int | None = None,
     ) -> tuple[torch.Tensor, LayerKVCache | None]:
         batch_size, seq_len, _ = hidden_states.shape
         query_states = self.q_proj(hidden_states).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
@@ -76,13 +80,29 @@ class SelfAttention(nn.Module):
             rope_cache=self.rope_cache,
         )
 
-        if past_key_value is not None:
-            key_states = torch.cat([past_key_value.key, key_states], dim=-2)
-            value_states = torch.cat([past_key_value.value, value_states], dim=-2)
+        if cache_manager is not None:
+            if cache_slot_ids is None or cache_total_length is None or layer_index is None:
+                raise ValueError("cache_manager path requires slot ids, total length, and layer index")
+            cache_positions = position_ids[:, 0].to(dtype=torch.long)
+            cache_manager.append_layer_tokens(
+                layer_index=layer_index,
+                slot_ids=cache_slot_ids,
+                positions=cache_positions,
+                key_states=key_states,
+                value_states=value_states,
+            )
+            stored_cache = cache_manager.get_layer_cache(layer_index, cache_slot_ids, cache_total_length)
+            key_states = stored_cache.key
+            value_states = stored_cache.value
+            present_key_value = None
+        else:
+            if past_key_value is not None:
+                key_states = torch.cat([past_key_value.key, key_states], dim=-2)
+                value_states = torch.cat([past_key_value.value, value_states], dim=-2)
 
-        present_key_value = None
-        if use_cache:
-            present_key_value = LayerKVCache(key=key_states, value=value_states)
+            present_key_value = None
+            if use_cache:
+                present_key_value = LayerKVCache(key=key_states, value=value_states)
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
@@ -133,6 +153,10 @@ class DecoderLayer(nn.Module):
         causal_mask: torch.Tensor | None,
         past_key_value: LayerKVCache | None = None,
         use_cache: bool = False,
+        cache_manager: SlotKVCacheManager | None = None,
+        cache_slot_ids: torch.Tensor | None = None,
+        cache_total_length: int | None = None,
+        layer_index: int | None = None,
     ) -> tuple[torch.Tensor, LayerKVCache | None]:
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
@@ -142,6 +166,10 @@ class DecoderLayer(nn.Module):
             causal_mask=causal_mask,
             past_key_value=past_key_value,
             use_cache=use_cache,
+            cache_manager=cache_manager,
+            cache_slot_ids=cache_slot_ids,
+            cache_total_length=cache_total_length,
+            layer_index=layer_index,
         )
         hidden_states = residual + hidden_states
 

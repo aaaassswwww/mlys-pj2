@@ -7,7 +7,7 @@ from typing import Dict, Iterable, List
 
 import torch
 
-from .cache import RequestKVCache
+from .cache import CacheHandle, RequestKVCache
 
 
 @dataclass
@@ -15,7 +15,7 @@ class RequestState:
     request_id: int
     tokens: torch.Tensor | None
     seq_len: int
-    kv_cache: RequestKVCache | None = None
+    kv_cache: CacheHandle | None = None
     cache_slot: int | None = None
     active: bool = True
 
@@ -49,7 +49,7 @@ class RequestStateTable:
             state.tokens = torch.cat([state.tokens, next_token], dim=0)
         return state
 
-    def update_kv_cache(self, request_id: int, kv_cache: RequestKVCache) -> RequestState:
+    def update_kv_cache(self, request_id: int, kv_cache: CacheHandle) -> RequestState:
         state = self.require(request_id)
         state.kv_cache = kv_cache
         if state.tokens is not None and state.tokens.numel() == state.seq_len:
