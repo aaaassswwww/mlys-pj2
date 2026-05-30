@@ -102,6 +102,7 @@ class LlamaLikeForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.model = LlamaLikeModel(config)
+        self._eager_model = self.model
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self._compile_enabled = False
 
@@ -169,9 +170,16 @@ class LlamaLikeForCausalLM(nn.Module):
         if self._compile_enabled:
             return True
         try:
-            self.model = compile_fn(self.model, mode="reduce-overhead", fullgraph=False, dynamic=True)
+            dynamo = getattr(torch, "_dynamo", None)
+            if dynamo is not None and hasattr(dynamo, "config"):
+                dynamo.config.suppress_errors = True
+            self.model = compile_fn(self._eager_model, mode="default", fullgraph=False, dynamic=True)
             self._compile_enabled = True
             return True
         except Exception:
-            self._compile_enabled = False
+            self.disable_compile()
             return False
+
+    def disable_compile(self) -> None:
+        self.model = self._eager_model
+        self._compile_enabled = False

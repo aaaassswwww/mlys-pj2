@@ -156,7 +156,10 @@ class Engine:
             return
         if not self.model.try_enable_compile():
             return
-        self._warmup_compiled_paths()
+        try:
+            self._warmup_compiled_paths()
+        except Exception:
+            self.model.disable_compile()
 
     @torch.inference_mode()
     def _warmup_compiled_paths(self) -> None:
