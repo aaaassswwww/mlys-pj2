@@ -85,6 +85,7 @@ class Engine:
     def decode(self, request_ids: Iterable[int], token_ids: object):
         request_ids = [int(request_id) for request_id in request_ids]
         token_ids = _normalize_decode_tokens(token_ids, expected=len(request_ids), device=self.device)
+        token_values = _tensor_to_int_list(token_ids)
 
         state_by_request_id = {}
         cached_request_ids: list[int] = []
@@ -93,7 +94,7 @@ class Engine:
         fallback_request_ids: list[int] = []
 
         for index, request_id in enumerate(request_ids):
-            token_value = int(token_ids[index].item())
+            token_value = token_values[index]
             state = self.requests.append_token(request_id, token_value)
             state_by_request_id[request_id] = state
             if state.kv_cache is None:
@@ -168,3 +169,9 @@ def _normalize_decode_tokens(token_ids: object, expected: int, device: str) -> t
     if token_ids.numel() != expected:
         raise ValueError(f"Expected {expected} decode tokens, got {token_ids.numel()}")
     return token_ids
+
+
+def _tensor_to_int_list(token_ids: torch.Tensor) -> list[int]:
+    if token_ids.device.type == "cpu":
+        return token_ids.tolist()
+    return token_ids.detach().to(device="cpu").tolist()

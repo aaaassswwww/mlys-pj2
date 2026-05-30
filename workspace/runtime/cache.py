@@ -60,11 +60,13 @@ def split_request_cache(cache: RequestKVCache) -> list[RequestKVCache]:
     batch_size = cache.layers[0].key.size(0)
     per_request_layers: list[list[LayerKVCache]] = [[] for _ in range(batch_size)]
     for layer in cache.layers:
-        for batch_index in range(batch_size):
-            per_request_layers[batch_index].append(
+        key_chunks = layer.key.split(1, dim=0)
+        value_chunks = layer.value.split(1, dim=0)
+        for request_layers, key_chunk, value_chunk in zip(per_request_layers, key_chunks, value_chunks):
+            request_layers.append(
                 LayerKVCache(
-                    key=layer.key[batch_index : batch_index + 1],
-                    value=layer.value[batch_index : batch_index + 1],
+                    key=key_chunk,
+                    value=value_chunk,
                 )
             )
     return [RequestKVCache(layers) for layers in per_request_layers]
