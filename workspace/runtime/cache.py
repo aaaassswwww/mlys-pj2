@@ -56,60 +56,65 @@ class SlotKVCacheManager:
         self.device = device
         self.dtype = dtype
         self.capacity_slots = 0
+        self.capacity_seq_len = 0
         self.key_caches: list[torch.Tensor] = []
         self.value_caches: list[torch.Tensor] = []
 
-    def ensure_slot_capacity(self, required_slot_count: int) -> None:
-        if required_slot_count <= self.capacity_slots:
-            return
-        new_capacity = max(1, self.capacity_slots)
-        while new_capacity < required_slot_count:
-            new_capacity *= 2
+    def ensure_capacity(self, required_slot_count: int, required_seq_len: int) -> None:
+        if required_seq_len > self.max_position_embeddings:
+            raise ValueError(
+                f"Requested sequence length {required_seq_len} exceeds max_position_embeddings={self.max_position_embeddings}"
+            )
 
-        if self.capacity_slots == 0:
-            self.key_caches = [
-                torch.empty(
-                    (new_capacity, self.num_kv_heads, self.max_position_embeddings, self.head_dim),
-                    device=self.device,
-                    dtype=self.dtype,
-                )
-                for _ in range(self.num_layers)
-            ]
-            self.value_caches = [
-                torch.empty(
-                    (new_capacity, self.num_kv_heads, self.max_position_embeddings, self.head_dim),
-                    device=self.device,
-                    dtype=self.dtype,
-                )
-                for _ in range(self.num_layers)
-            ]
-            self.capacity_slots = new_capacity
+        required_slot_count = max(1, int(required_slot_count))
+        required_seq_len = max(1, int(required_seq_len))
+        if required_slot_count <= self.capacity_slots and required_seq_len <= self.capacity_seq_len:
             return
+
+        new_slot_capacity = max(1, self.capacity_slots)
+        while new_slot_capacity < required_slot_count:
+            new_slot_capacity *= 2
+
+        new_seq_capacity = max(16, self.capacity_seq_len)
+        while new_seq_capacity < required_seq_len:
+            new_seq_capacity *= 2
+        new_seq_capacity = min(new_seq_capacity, self.max_position_embeddings)
 
         expanded_keys = []
         expanded_values = []
-        for key_cache, value_cache in zip(self.key_caches, self.value_caches):
+        if self.capacity_slots == 0:
+            layer_pairs = [(None, None)] * self.num_layers
+        else:
+            layer_pairs = zip(self.key_caches, self.value_caches)
+
+        for key_cache, value_cache in layer_pairs:
             new_key_cache = torch.empty(
-                (new_capacity, self.num_kv_heads, self.max_position_embeddings, self.head_dim),
+                (new_slot_capacity, self.num_kv_heads, new_seq_capacity, self.head_dim),
                 device=self.device,
                 dtype=self.dtype,
             )
             new_value_cache = torch.empty(
-                (new_capacity, self.num_kv_heads, self.max_position_embeddings, self.head_dim),
+                (new_slot_capacity, self.num_kv_heads, new_seq_capacity, self.head_dim),
                 device=self.device,
                 dtype=self.dtype,
             )
-            new_key_cache[: self.capacity_slots].copy_(key_cache[: self.capacity_slots])
-            new_value_cache[: self.capacity_slots].copy_(value_cache[: self.capacity_slots])
+            if key_cache is not None and value_cache is not None:
+                new_key_cache[: self.capacity_slots, :, : self.capacity_seq_len, :].copy_(
+                    key_cache[: self.capacity_slots, :, : self.capacity_seq_len, :]
+                )
+                new_value_cache[: self.capacity_slots, :, : self.capacity_seq_len, :].copy_(
+                    value_cache[: self.capacity_slots, :, : self.capacity_seq_len, :]
+                )
             expanded_keys.append(new_key_cache)
             expanded_values.append(new_value_cache)
 
         self.key_caches = expanded_keys
         self.value_caches = expanded_values
-        self.capacity_slots = new_capacity
+        self.capacity_slots = new_slot_capacity
+        self.capacity_seq_len = new_seq_capacity
 
     def store_request_cache(self, slot: int, request_cache: RequestKVCache) -> CacheHandle:
-        self.ensure_slot_capacity(slot + 1)
+        self.ensure_capacity(slot + 1, request_cache.seq_len)
         seq_len = request_cache.seq_len
         for layer_index, layer_cache in enumerate(request_cache.layers):
             self.key_caches[layer_index][slot, :, :seq_len, :].copy_(layer_cache.key.squeeze(0))
@@ -124,7 +129,7 @@ class SlotKVCacheManager:
         key_states: torch.Tensor,
         value_states: torch.Tensor,
     ) -> None:
-        self.ensure_slot_capacity(int(slot_ids.max().item()) + 1)
+        self.ensure_capacity(int(slot_ids.max().item()) + 1, int(positions.max().item()) + 1)
         batch_indices = torch.arange(slot_ids.numel(), device=slot_ids.device)
         self.key_caches[layer_index][slot_ids, :, positions, :] = key_states[batch_indices, :, 0, :]
         self.value_caches[layer_index][slot_ids, :, positions, :] = value_states[batch_indices, :, 0, :]

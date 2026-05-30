@@ -47,6 +47,7 @@ Initial public evaluator result:
 - Request state stores `CacheHandle(slot, seq_len)` after cache materialization.
 - Prefill still materializes full request KV once, then writes it into slot storage.
 - Batched decode writes new K/V directly into slot-backed caches and reads them back by slot id.
+- Slot-backed storage now expands on demand across both slot count and sequence length instead of allocating full `max_position_embeddings` up front.
 
 ## Validation Checklist
 
@@ -98,4 +99,4 @@ python3 workspace/tools/profile_decode.py --device auto --batch-size 8 --prompt-
 
 - Local regression: passed on `2026-05-30`
 - Current phase: `Step 3 in progress`
-- Next action: rerun public GPU evaluator after the slot-backed cache change
+- Next action: rerun public GPU evaluator after the dynamic-capacity slot cache fix
