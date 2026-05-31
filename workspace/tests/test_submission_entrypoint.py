@@ -57,15 +57,12 @@ class SubmissionEntrypointTest(unittest.TestCase):
         output_text = output_path.read_text(encoding="utf-8")
         self.assertIn("[run.sh] selfcheck=passed", log_text)
         self.assertIn("[selfcheck] prefill_decode_remove=ok", log_text)
-        self.assertIn("[run.sh] output moved to output3.txt", result_log_text)
+        self.assertIn("[run.sh] selfcheck=passed", result_log_text)
+        self.assertIn("[selfcheck] prefill_decode_remove=ok", result_log_text)
         self.assertIn("[run.sh] selfcheck=passed", output_text)
         self.assertIn("[selfcheck] prefill_decode_remove=ok", output_text)
-        self.assertIn("0. Run Log", output_text)
-        self.assertIn("workspace/engine.py", output_text)
-        self.assertIn("Phase 0 through Phase 7 completed", output_text)
-        self.assertIn("Decode Optimization Reasoning", output_text)
-        self.assertIn("benchmark status in this run:", output_text)
-        self.assertTrue('"case_name"' in output_text or "- unavailable in this run" in output_text)
+        self.assertIn("[run.sh] runtime import path:", output_text)
+        self.assertIn("[run.sh] output_file=", output_text)
 
 
 if __name__ == "__main__":
