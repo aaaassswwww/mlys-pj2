@@ -58,11 +58,11 @@ export MLSYS_DEBUG_RESULT_LOG="${MLSYS_DEBUG_RESULT_LOG:-1}"
 
 mkdir -p "$RUNTIME_DIR"
 : > "$LOG_FILE"
-: > "$RESULT_LOG_FILE"
 : > "$OUTPUT_FILE"
+rm -f "$RESULT_LOG_FILE"
 rm -f "$BENCHMARK_FILE"
 
-exec > >(tee -a "$LOG_FILE" "$RESULT_LOG_FILE" "$OUTPUT_FILE") 2>&1
+exec > >(tee -a "$LOG_FILE" "$OUTPUT_FILE") 2>&1
 
 echo "[run.sh] start"
 echo "[run.sh] root=$ROOT_DIR"
@@ -100,7 +100,7 @@ if [[ -f "evaluator/benchmark_throughput.py" && -f "target/model_config.json" ]]
       --model-config target/model_config.json \
       --weight-dir target/weights \
       --device auto | tee "$BENCHMARK_FILE"
-    echo "[run.sh] benchmark_file=$BENCHMARK_FILE"
+echo "[run.sh] benchmark_file=$BENCHMARK_FILE"
   else
     echo "[run.sh] benchmark skipped: target/weights not available"
   fi

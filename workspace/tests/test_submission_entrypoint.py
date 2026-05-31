@@ -50,19 +50,16 @@ class SubmissionEntrypointTest(unittest.TestCase):
         result_log_path = ROOT / "workspace" / "result.log"
         output_path = ROOT / "output3.txt"
         self.assertTrue(log_path.is_file())
-        self.assertTrue(result_log_path.is_file())
         self.assertTrue(output_path.is_file())
         log_text = log_path.read_text(encoding="utf-8")
-        result_log_text = result_log_path.read_text(encoding="utf-8")
         output_text = output_path.read_text(encoding="utf-8")
         self.assertIn("[run.sh] selfcheck=passed", log_text)
         self.assertIn("[selfcheck] prefill_decode_remove=ok", log_text)
-        self.assertIn("[run.sh] selfcheck=passed", result_log_text)
-        self.assertIn("[selfcheck] prefill_decode_remove=ok", result_log_text)
         self.assertIn("[run.sh] selfcheck=passed", output_text)
         self.assertIn("[selfcheck] prefill_decode_remove=ok", output_text)
         self.assertIn("[run.sh] runtime import path:", output_text)
         self.assertIn("[run.sh] output_file=", output_text)
+        self.assertFalse(result_log_path.exists())
 
 
 if __name__ == "__main__":
