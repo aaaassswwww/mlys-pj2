@@ -45,7 +45,7 @@ class EngineInterfaceTest(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.weight_dir, ignore_errors=True)
         os.environ.pop("MLSYS_DEBUG_RESULT_LOG", None)
-        debug_log = Path(__file__).resolve().parents[1] / "result.log"
+        debug_log = Path(__file__).resolve().parents[1] / "results.log"
         if debug_log.exists():
             try:
                 debug_log.unlink()
@@ -62,7 +62,7 @@ class EngineInterfaceTest(unittest.TestCase):
         os.environ["MLSYS_DEBUG_RESULT_LOG"] = "1"
         engine = create_engine(self.config, self.weight_dir, device="cpu")
         engine.remove([123])
-        debug_log = Path(__file__).resolve().parents[1] / "result.log"
+        debug_log = Path(__file__).resolve().parents[1] / "results.log"
         self.assertTrue(debug_log.is_file())
         text = debug_log.read_text(encoding="utf-8")
         self.assertIn("[engine.py] create_engine", text)

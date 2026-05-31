@@ -242,6 +242,6 @@ def _debug_enabled() -> bool:
 def _debug_log(message: str) -> None:
     if not _debug_enabled():
         return
-    log_path = Path(__file__).resolve().parent / "result.log"
+    log_path = Path(__file__).resolve().parent / "results.log"
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(f"[engine.py] {message}\n")

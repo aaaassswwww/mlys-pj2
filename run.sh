@@ -2,49 +2,23 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_DIR="$ROOT_DIR/workspace"
+ENGINE_IMPORT_PATH="workspace/engine.py"
+SELFCHECK_PATH="workspace/tools/selfcheck_submission.py"
 
-ENGINE_IMPORT_PATH=""
-SELFCHECK_PATH=""
-RUNTIME_DIR=""
-
-if [[ -f "$ROOT_DIR/workspace/engine.py" ]]; then
-  ENGINE_IMPORT_PATH="workspace/engine.py"
-elif [[ -f "$ROOT_DIR/engine.py" ]]; then
-  ENGINE_IMPORT_PATH="engine.py"
-else
-  ENGINE_CANDIDATE="$(find "$ROOT_DIR" -maxdepth 4 -type f -name engine.py | head -n 1 || true)"
-  if [[ -n "$ENGINE_CANDIDATE" ]]; then
-    ENGINE_IMPORT_PATH="${ENGINE_CANDIDATE#$ROOT_DIR/}"
-  fi
-fi
-
-if [[ -z "$ENGINE_IMPORT_PATH" ]]; then
-  echo "[run.sh] unable to locate engine.py under $ROOT_DIR" >&2
+if [[ ! -f "$ROOT_DIR/$ENGINE_IMPORT_PATH" ]]; then
+  echo "[run.sh] missing required engine entrypoint: $ROOT_DIR/$ENGINE_IMPORT_PATH" >&2
   exit 1
 fi
 
-RUNTIME_DIR="$(cd "$(dirname "$ROOT_DIR/$ENGINE_IMPORT_PATH")" && pwd)"
-
-if [[ -f "$ROOT_DIR/workspace/tools/selfcheck_submission.py" ]]; then
-  SELFCHECK_PATH="workspace/tools/selfcheck_submission.py"
-elif [[ -f "$ROOT_DIR/tools/selfcheck_submission.py" ]]; then
-  SELFCHECK_PATH="tools/selfcheck_submission.py"
-else
-  SELFCHECK_CANDIDATE="$(find "$ROOT_DIR" -maxdepth 5 -type f -path '*/tools/selfcheck_submission.py' | head -n 1 || true)"
-  if [[ -n "$SELFCHECK_CANDIDATE" ]]; then
-    SELFCHECK_PATH="${SELFCHECK_CANDIDATE#$ROOT_DIR/}"
-  fi
-fi
-
-if [[ -z "$SELFCHECK_PATH" ]]; then
-  echo "[run.sh] unable to locate selfcheck_submission.py under $ROOT_DIR" >&2
+if [[ ! -f "$ROOT_DIR/$SELFCHECK_PATH" ]]; then
+  echo "[run.sh] missing selfcheck helper: $ROOT_DIR/$SELFCHECK_PATH" >&2
   exit 1
 fi
 
-LOG_FILE="$RUNTIME_DIR/results.log"
-RESULT_LOG_FILE="$RUNTIME_DIR/result.log"
+LOG_FILE="$WORKSPACE_DIR/results.log"
 OUTPUT_FILE="$ROOT_DIR/output3.txt"
-BENCHMARK_FILE="$RUNTIME_DIR/benchmark_results.json"
+BENCHMARK_FILE="$WORKSPACE_DIR/benchmark_results.json"
 
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_BIN="$PYTHON"
@@ -54,12 +28,11 @@ else
   PYTHON_BIN="python"
 fi
 
-export MLSYS_DEBUG_RESULT_LOG="${MLSYS_DEBUG_RESULT_LOG:-1}"
+export MLSYS_DEBUG_RESULT_LOG="${MLSYS_DEBUG_RESULT_LOG:-0}"
 
-mkdir -p "$RUNTIME_DIR"
+mkdir -p "$WORKSPACE_DIR"
 : > "$LOG_FILE"
 : > "$OUTPUT_FILE"
-rm -f "$RESULT_LOG_FILE"
 rm -f "$BENCHMARK_FILE"
 
 exec > >(tee -a "$LOG_FILE" "$OUTPUT_FILE") 2>&1
@@ -100,7 +73,7 @@ if [[ -f "evaluator/benchmark_throughput.py" && -f "target/model_config.json" ]]
       --model-config target/model_config.json \
       --weight-dir target/weights \
       --device auto | tee "$BENCHMARK_FILE"
-echo "[run.sh] benchmark_file=$BENCHMARK_FILE"
+    echo "[run.sh] benchmark_file=$BENCHMARK_FILE"
   else
     echo "[run.sh] benchmark skipped: target/weights not available"
   fi
