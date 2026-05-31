@@ -34,6 +34,12 @@ def create_engine(model_config: dict, weight_dir: str, device: str = "cuda") -> 
     Phase 1 provides a correctness-first baseline that recomputes full
     request sequences on each decode step.
     """
+    _debug_log(
+        "create_engine"
+        f" device={device!r}"
+        f" weight_dir={weight_dir!r}"
+        f" config_keys={sorted(model_config.keys())}"
+    )
     return Engine(model_config=model_config, weight_dir=weight_dir, device=device)
 
 
@@ -48,12 +54,26 @@ class Engine:
         self.model = load_model(model_config, weight_dir, device=self.device)
         self._maybe_prepare_compiled_paths()
         self.requests = RequestStateTable(device=torch.device(self.device))
+        _debug_log(
+            "engine_init"
+            f" resolved_device={self.device!r}"
+            f" hidden_size={self.runtime_config.hidden_size}"
+            f" num_layers={self.runtime_config.num_hidden_layers}"
+            f" num_heads={self.runtime_config.num_attention_heads}"
+            f" num_kv_heads={self.runtime_config.num_key_value_heads}"
+        )
 
     @torch.inference_mode()
     def prefill(self, request_ids: Iterable[int], input_ids: List[object]):
         request_ids = [int(request_id) for request_id in request_ids]
         if len(request_ids) != len(input_ids):
             raise ValueError("request_ids and input_ids must have the same length")
+        _debug_log(
+            "prefill"
+            f" batch_size={len(request_ids)}"
+            f" request_ids={request_ids}"
+            f" lengths={[int(torch.as_tensor(tokens).numel()) for tokens in input_ids]}"
+        )
 
         sequences_by_request: dict[int, torch.Tensor] = {}
         sequence_lengths: list[int] = []
@@ -89,6 +109,12 @@ class Engine:
     def decode(self, request_ids: Iterable[int], token_ids: object):
         request_ids = [int(request_id) for request_id in request_ids]
         token_ids = _normalize_decode_tokens(token_ids, expected=len(request_ids), device=self.device)
+        _debug_log(
+            "decode"
+            f" batch_size={len(request_ids)}"
+            f" request_ids={request_ids}"
+            f" token_shape={tuple(token_ids.shape)}"
+        )
         token_values = _tensor_to_int_list(token_ids)
 
         state_by_request_id = {}
@@ -150,6 +176,8 @@ class Engine:
 
     @torch.inference_mode()
     def remove(self, request_ids: Iterable[int]):
+        request_ids = [int(request_id) for request_id in request_ids]
+        _debug_log(f"remove request_ids={request_ids}")
         self.requests.remove(request_ids)
 
     def _maybe_prepare_compiled_paths(self) -> None:
@@ -205,3 +233,15 @@ def _tensor_to_int_list(token_ids: torch.Tensor) -> list[int]:
     if token_ids.device.type == "cpu":
         return token_ids.tolist()
     return token_ids.detach().to(device="cpu").tolist()
+
+
+def _debug_enabled() -> bool:
+    return os.environ.get("MLSYS_DEBUG_RESULT_LOG", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _debug_log(message: str) -> None:
+    if not _debug_enabled():
+        return
+    log_path = Path(__file__).resolve().parent / "result.log"
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(f"[engine.py] {message}\n")
