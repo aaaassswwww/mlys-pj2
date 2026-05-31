@@ -54,6 +54,8 @@ else
   PYTHON_BIN="python"
 fi
 
+export MLSYS_DEBUG_RESULT_LOG="${MLSYS_DEBUG_RESULT_LOG:-1}"
+
 mkdir -p "$RUNTIME_DIR"
 : > "$LOG_FILE"
 : > "$RESULT_LOG_FILE"
