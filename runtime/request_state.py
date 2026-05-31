@@ -44,6 +44,8 @@ class RequestStateTable:
     def append_token(self, request_id: int, token_id: int) -> RequestState:
         state = self.require(request_id)
         state.seq_len += 1
+        # We only keep the full token history until the first cache-backed
+        # prefill finishes. After that, decode advances by seq_len alone.
         if state.kv_cache is None and state.tokens is not None:
             next_token = torch.tensor([token_id], device=self.device, dtype=torch.long)
             state.tokens = torch.cat([state.tokens, next_token], dim=0)
@@ -52,6 +54,8 @@ class RequestStateTable:
     def update_kv_cache(self, request_id: int, kv_cache: RequestKVCache) -> RequestState:
         state = self.require(request_id)
         state.kv_cache = kv_cache
+        # Once cache length matches the request length, the full prompt tokens
+        # are no longer needed for incremental decode and can be dropped.
         if state.tokens is not None and state.tokens.numel() == state.seq_len:
             state.tokens = None
         return state

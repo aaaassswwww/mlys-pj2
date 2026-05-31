@@ -43,6 +43,8 @@ def stack_request_caches(caches: Iterable[RequestKVCache]) -> RequestKVCache:
     num_layers = caches[0].num_layers()
     stacked_layers: list[LayerKVCache] = []
     for layer_index in range(num_layers):
+        # Each per-request cache stores batch dimension = 1. Concatenating on
+        # dim 0 gives us a temporary decode batch without changing layout.
         keys = [cache.layers[layer_index].key for cache in caches]
         values = [cache.layers[layer_index].value for cache in caches]
         stacked_layers.append(
@@ -60,6 +62,8 @@ def split_request_cache(cache: RequestKVCache) -> list[RequestKVCache]:
     batch_size = cache.layers[0].key.size(0)
     per_request_layers: list[list[LayerKVCache]] = [[] for _ in range(batch_size)]
     for layer in cache.layers:
+        # The inverse of stack_request_caches(): restore batch=1 caches so the
+        # request table can own them independently after this decode step.
         key_chunks = layer.key.split(1, dim=0)
         value_chunks = layer.value.split(1, dim=0)
         for request_layers, key_chunk, value_chunk in zip(per_request_layers, key_chunks, value_chunks):

@@ -70,12 +70,16 @@ class LlamaLikeModel(nn.Module):
     ) -> tuple[torch.Tensor, RequestKVCache | None]:
         hidden_states = self.embed_tokens(input_ids)
         if position_ids is None:
+            # Prefill uses a fresh contiguous range. Decode passes explicit
+            # positions so the new token lands after the cached prefix.
             start = past_key_values.seq_len if past_key_values is not None else 0
             position_ids = torch.arange(start, start + input_ids.size(1), device=input_ids.device, dtype=torch.long).unsqueeze(0)
             position_ids = position_ids.expand(input_ids.size(0), -1)
 
         causal_mask = None
         if input_ids.size(1) > 1 and past_key_values is None:
+            # Only prompt prefill needs a causal matrix. Single-token decode
+            # relies on the cache and does not need an explicit square mask.
             causal_mask = torch.triu(
                 torch.full((input_ids.size(1), input_ids.size(1)), float("-inf"), device=input_ids.device),
                 diagonal=1,
@@ -173,6 +177,8 @@ class LlamaLikeForCausalLM(nn.Module):
             dynamo = getattr(torch, "_dynamo", None)
             if dynamo is not None and hasattr(dynamo, "config"):
                 dynamo.config.suppress_errors = True
+            # The eager model is retained so compile can be treated as an
+            # optional acceleration path instead of a hard dependency.
             self.model = compile_fn(self._eager_model, mode="default", fullgraph=False, dynamic=True)
             self._compile_enabled = True
             return True

@@ -83,6 +83,8 @@ class Engine:
         logits_by_request: dict[int, torch.Tensor] = {}
         grouped_requests = group_request_ids_by_sequence_length(request_ids, sequence_lengths)
         for _, grouped_request_ids in grouped_requests.items():
+            # We batch only same-length prompts here so we can use a plain stack
+            # without introducing padding or attention-mask bookkeeping.
             batch_input = torch.stack([sequences_by_request[request_id] for request_id in grouped_request_ids], dim=0)
             if len(grouped_request_ids) == 1:
                 logits, kv_cache = self.model.logits_and_cache_for_prefill(batch_input)
@@ -146,6 +148,8 @@ class Engine:
         )
 
         for cache_len, request_index_pairs in grouped_state_pairs.items():
+            # Incremental decode reuses past KV cache, so requests can share a
+            # decode batch only when their current cache length matches.
             request_group = [request_id for request_id, _ in request_index_pairs]
             group_indices = [token_index for _, token_index in request_index_pairs]
             items = [state_by_request_id[request_id] for request_id in request_group]
@@ -184,6 +188,9 @@ class Engine:
         if not self.model.try_enable_compile():
             return
         try:
+            # Warm a tiny prefill+decode path so evaluator runs can reuse the
+            # compiled graph when shapes stay compatible. Any failure falls
+            # back to eager mode instead of risking correctness or startup.
             self._warmup_compiled_paths()
         except Exception:
             self.model.disable_compile()

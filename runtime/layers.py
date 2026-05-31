@@ -77,6 +77,7 @@ class SelfAttention(nn.Module):
         )
 
         if past_key_value is not None:
+            # Decode appends one new token to the cached prefix for each layer.
             key_states = torch.cat([past_key_value.key, key_states], dim=-2)
             value_states = torch.cat([past_key_value.value, value_states], dim=-2)
 
@@ -102,6 +103,8 @@ class SelfAttention(nn.Module):
                 attn_mask = causal_mask.view(1, 1, query_states.size(-2), key_states.size(-2))
             else:
                 attn_mask = None
+            # Prefer SDPA on modern PyTorch/CUDA builds; fall back to the
+            # explicit matmul path if the backend or shape combination refuses it.
             return F.scaled_dot_product_attention(
                 query_states,
                 key_states,
